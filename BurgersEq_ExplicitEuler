@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue May 26 12:03:57 2026
+
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
+# parameters
+dx=1/1000
+nx=int(2/dx)
+x = np.arange(nx) * dx
+T=2
+dt=0.0001
+nt=int(T/dt)
+
+
+# initial conditions
+u=np.zeros(nx)
+u= 0.5*(2+np.sin(np.pi*x)+2+np.sin(np.pi*np.roll(x,1)))
+
+
+# evolution of u
+evolution_u=[u]
+
+for n in range(nt):
+    t=n*dt
+    u_square=u**2
+    u=u-dt*0.5*(u_square-np.roll(u_square, 1))/dx
+    evolution_u.append(u.copy())
+    
+    
+    
+# initial condition
+u = 2 + np.sin(np.pi * x)
+
+# finite volume initial averaging
+u = 0.5 * (u + np.roll(u,1))
+
+t = 0
+evolution_u1=[u]
+time_history = [t]
+while t < T:
+
+    flux = 0.5 * u**2
+
+    flux_left = np.roll(flux,1)
+
+    u = u - (dt/dx) * (flux - flux_left)
+
+    t += dt
+    
+    evolution_u1.append(u.copy())
+    
+    time_history.append(t)
+
+
+plt.plot(x, evolution_u1[0], label="t=0")
+plt.plot(x, evolution_u1[100], label="t=0.01")
+plt.plot(x, evolution_u1[3000], label="t=.3")
+plt.plot(x, evolution_u1[4000], label="t=0.4")
+plt.plot(x, evolution_u1[10000], label="t=1")
+plt.plot(x, evolution_u1[-1], label="t=2")
+
+plt.legend()
+plt.xlabel("x")
+plt.ylabel("u")
+plt.title("Burgers equation")
+plt.show()

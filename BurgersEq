@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Jun  5 15:20:18 2026
+
+@author: annelies
+"""
+
+import numpy as np
+from scipy.sparse.linalg import gmres, LinearOperator
+import time  # Imported for wall-clock tracking
+
+# parameters
+dx = 1 / 4000
+nx = int(2 / dx)
+x = np.arange(nx) * dx
+dt = 0.1
+
+# initial conditions
+x_minus = np.roll(x, 1)
+Uold = 0.5 * ((2 + np.sin(np.pi * x_minus)) + (2 + np.sin(np.pi * x)))
+
+# Nonlinear residual for Newtons method
+def F(U, Uold, dx, dt=dt):
+    Um = np.roll(U, 1)
+    return U - Uold + (dt / (2 * dx)) * (U**2 - Um**2)
+
+# Finite Difference for Jv 
+def Jv(U, v, Uold=Uold, dx=dx, dt=dt):
+    norm_v = np.linalg.norm(v)
+    # Safety check for the zero vector passed by GMRES
+    if norm_v < 1e-15:
+        return np.zeros_like(v)
+    eps = 1e-8 / norm_v
+    return (F(U + eps * v, Uold, dx, dt) - F(U, Uold, dx, dt)) / eps
+
+# def for eta_A in Eisenstat Walker
+def etaA(F_norm, prev_F_norm, gamma=0.9, alpha=2):
+    return gamma * (F_norm / prev_F_norm) ** alpha
+
+# def for eta_c in Eisenstat Walker
+def etaC(eta_A, iteration, prev_eta, eta_max=0.5, gamma=0.9):
+    if iteration == 0:
+        return eta_max
+    if gamma * prev_eta**2 > 0.1:
+        return min(eta_max, max(eta_A, gamma * prev_eta**2))
+    return min(eta_max, eta_A)
+    
+# def for eta for Eisenstat Walker
+def eta(eta_C, res_k, eta_max=0.5, eps=1e-10):
+    return min(eta_max, max(eta_C, 0.5 * eps / res_k))
+
+# 2-stage explicit RK smoother, alpha=1/3
+def rk2_smoother(e, r, U, Uold, dx, dt_star=0.001, alpha=1/3, steps=3):
+    for _ in range(steps):
+        r0 = r - Jv(U, e, Uold, dx)
+        e1 = e + alpha * dt_star * r0
+        r1 = r - Jv(U, e1, Uold, dx)
+        e = e + dt_star * r1
+    return e
+
+# def restriction of a grid
+def restriction(a):
+    return 0.5 * (a[0::2] + a[1::2])
+
+# def prolongation of a grid
+def prolongation(a):
+    c = np.zeros(len(a) * 2)
+    c[0::2] = a
+    c[1::2] = a      
+    return c
+
+# Multigrid preconditioning loop
+def MG(level, r, U, Uold, dx):
+     
+    if level == 0:
+        n0 = len(r)
+        J_coarse = np.zeros((n0, n0))
+        
+        # Reconstruct the explicit coarse Jacobian matrix column by column
+        for j in range(n0):
+            v = np.zeros(n0)
+            v[j] = 1.0  # Standard basis vector e_j
+            J_coarse[:, j] = Jv(U, v, Uold, dx)
+            
+        # Solve the linear system exactly: e = A_0^(-1) * r
+        return np.linalg.solve(J_coarse, r)
+        
+    e = np.zeros_like(r)
+    
+    # 1. Pre-smoothing
+    e = rk2_smoother(e, r, U, Uold, dx, dt_star=0.001, steps=3)
+    
+    # 2. Compute residual and restrict
+    residual = r - Jv(U, e, Uold, dx)
+    r_c = restriction(residual)
+    U_c = restriction(U)
+    Uold_c = restriction(Uold)
+    
+    # 3. Recursive coarse correction solve
+    e_c = MG(level - 1, r_c, U_c, Uold_c, dx * 2)
+    
+    # 4. Prolongate error corrections and add to initial guess
+    e += prolongation(e_c)
+    
+    return e
+
+# get linear operator (ie inverse of J(U)) for gmres
+def MG_precond_factory(U, Uold, dx, level):
+    def M(v):
+        return MG(level, v, U, Uold, dx)
+    return LinearOperator((len(U), len(U)), matvec=M)
+
+# Callback class to capture GMRES iteration count
+class GMRESIterationCounter:
+    def __init__(self):
+        self.count = 0
+
+    def __call__(self, rk=None):
+        self.count += 1
+
+def newton_step(level, Uold=Uold, eta_max=0.5, max_iterations=50, dt=dt, dx=dx):
+    res_0 = np.linalg.norm(F(Uold, Uold, dx))
+    target_tol = 1e-10 * res_0
+    res_k = res_0
+    U = Uold.copy()
+    
+    iteration = 0
+    prev_eta = eta_max
+    prev_res = res_0
+    
+    print(f"Initial Residual: {res_0:.5e} | Target Threshold: {target_tol:.5e}\n" + "-"*105)
+    
+    while res_k >= target_tol and iteration < max_iterations:
+        iter_start_time = time.time()  # Start timing individual Newton iteration
+        
+        r = -F(U, Uold, dx)
+        A = LinearOperator((len(U), len(U)), matvec=lambda v: Jv(U, v, Uold, dx))
+        
+        M = MG_precond_factory(U, Uold, dx, level)
+        
+        if iteration == 0:
+            eta_k = eta_max
+        else:
+            eta_A = etaA(res_k, prev_res)
+            eta_C = etaC(eta_A, iteration, prev_eta)
+            eta_k = eta(eta_C, res_k)
+        
+        # Linear solver (GMRES) with iteration counter tracking
+        counter = GMRESIterationCounter()
+        s, info = gmres(A, r, rtol=eta_k, M=M, callback=counter, callback_type='legacy')
+        
+        prev_res = res_k
+        prev_eta = eta_k
+        
+        U += s
+        res_k = np.linalg.norm(F(U, Uold, dx))
+        
+        iter_end_time = time.time()  # Stop timing individual Newton iteration
+        elapsed_iter = iter_end_time - iter_start_time
+        
+        print(f"Iteration {iteration:02d} | Residual: {res_k:.5e} | η_k: {eta_k:.4e} | GMRES Iterations: {counter.count:3d} | Time: {elapsed_iter:.4f}s")
+        iteration += 1
+        
+    return U, iteration
+
+# Start overall solver timer
+global_start_time = time.time()
+
+# Execute the solver step
+u, iteration = newton_step(5)
+
+# Stop overall solver timer
+global_end_time = time.time()
+print("-"*105)
+print(f"Total JFNK-Multigrid Solver Time: {global_end_time - global_start_time:.4f} seconds.")
+
+
+
+
+
+
+
+
+
+

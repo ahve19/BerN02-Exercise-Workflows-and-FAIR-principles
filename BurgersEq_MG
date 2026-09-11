@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Jun  5 14:29:36 2026
+
+@author: annelies
+"""
+
+import numpy as np
+from scipy.sparse.linalg import gmres, LinearOperator
+import matplotlib.pyplot as plt
+import time
+
+# parameters
+dx = 1 / 1000
+nx = int(2 / dx)
+x = np.arange(nx) * dx
+dt = 0.1
+
+# initial conditions
+x_minus = np.roll(x, 1)
+Uold = 0.5 * ((2 + np.sin(np.pi * x_minus)) + (2 + np.sin(np.pi * x)))
+
+# Callback class to capture GMRES iteration count
+class GMRESIterationCounter:
+    def __init__(self):
+        self.count = 0
+
+    def __call__(self, rk=None):
+        self.count += 1
+
+# Nonlinear residual for Newtons method
+def F(U, Uold=Uold, dx=dx, dt=dt):
+    Um = np.roll(U, 1)
+    return U - Uold + (dt / (2 * dx)) * (U**2 - Um**2)
+
+def Jv(U, v, Uold=Uold, dx=dx, dt=dt):
+    norm_v = np.linalg.norm(v)
+    # Safety check for the zero vector passed by GMRES
+    if norm_v < 1e-15:
+        return np.zeros_like(v)
+    eps = 1e-8 / norm_v
+    return (F(U + eps * v, Uold, dx, dt) - F(U, Uold, dx, dt)) / eps
+
+# def for eta_A in Eisenstat Walker
+def etaA(F_norm, prev_F_norm, gamma=0.9, alpha=2):
+    return gamma * (F_norm / prev_F_norm) ** alpha
+
+# def for eta_c in Eisenstat Walker
+def etaC(eta_A, iteration, prev_eta, eta_max=0.5, gamma=0.9):
+    if iteration == 0:
+        return eta_max
+    if gamma * prev_eta**2 > 0.1:
+        return min(eta_max, max(eta_A, gamma * prev_eta**2))
+    return min(eta_max, eta_A)
+
+# def for eta for Eisenstat Walker
+def eta(eta_C, res_k, eta_max=0.5, eps=1e-10):
+    return min(eta_max, max(eta_C, 0.5 * eps / res_k))
+
+def newton_step(Uold):
+    U=Uold.copy()
+    res_0 = np.linalg.norm(F(U, Uold, dx))
+    res_k=res_0
+    iteration=0
+    eta_max=0.5
+    prev_eta = eta_max
+    prev_res = res_0
+    
+    while res_k>=1e-10*res_0:
+        if iteration == 0:
+            eta_k = eta_max
+        else:
+            eta_A = etaA(res_k, prev_res)
+            eta_C = etaC(eta_A, iteration, prev_eta)
+            eta_k = eta(eta_C, res_k)
+        A= LinearOperator((len(U),len(U)), matvec=lambda v: Jv(U, v, Uold, dx))
+        b=-F(U)
+        
+        counter = GMRESIterationCounter()
+        s, it= gmres(A, b, rtol=eta_k, callback=counter, callback_type='legacy', restart = 2000)
+
+        prev_res = res_k
+        prev_eta = eta_k
+        
+        U += s
+        res_k = np.linalg.norm(F(U, Uold, dx))
+        
+        print(f"Iteration {iteration:02d} | Residual: {res_k:.5e} | η_k: {eta_k:.4e} | GMRES Iterations: {counter.count}")
+        iteration += 1
+        
+    return U, iteration
+
+global_start_time = time.time()
+newton_step(Uold)
+global_end_time = time.time()
+print("-"*105)
+print(f"Total JFNK-Multigrid Solver Time: {global_end_time - global_start_time:.4f} seconds.")
+
