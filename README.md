@@ -1,6 +1,6 @@
 # Solving the Inviscid Burgers' Equation: Explicit Upwind, Jacobian-Free Newton–Krylov, and Multigrid-Preconditioned JFNK
 
-[![DOI](https://zenodo.org/badge/1366124464.svg)](https://doi.org/10.5281/zenodo.22756571)
+**DOI**: [![DOI](https://zenodo.org/badge/1366124464.svg)](https://doi.org/10.5281/zenodo.22756571)
 
 **Contents**
 1. [Problem statement](#1-problem-statement)
