@@ -1,0 +1,23 @@
+# Conda environment for the Burgers' equation solvers
+# (explicit upwind, JFNK, and JFNK + multigrid preconditioning).
+#
+# Create with:   conda env create -f environment.yml
+# Activate with: conda activate burgers-jfnk-mg
+# Update with:   conda env update -f environment.yml --prune
+#
+# Versions below are pinned to exactly what was used to generate the
+# outputs in Burgers_Equation_JFNK_Multigrid.md. Loosen the pins (e.g.
+# numpy>=1.24,<3) if you need compatibility with an existing environment;
+# the code only relies on stable, long-standing APIs
+# (numpy array ops / np.roll, scipy.sparse.linalg.gmres + LinearOperator,
+# matplotlib.pyplot) so most reasonably recent versions of each package
+# will work.
+
+name: burgers-jfnk-mg
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12.3
+  - numpy=2.4.4
+  - scipy=1.17.1
+  - matplotlib=3.10.8
