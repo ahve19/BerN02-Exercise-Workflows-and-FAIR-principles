@@ -1,7 +1,5 @@
 # Solving the Inviscid Burgers' Equation: Explicit Upwind, Jacobian-Free Newton–Krylov, and Multigrid-Preconditioned JFNK
 
-This notebook-style document walks through three increasingly sophisticated numerical solvers for the 1D inviscid Burgers' equation, all implemented in Python. It is written so that someone unfamiliar with the code can install the requirements, run each solver, and understand *why* each design choice (upwinding, Jacobian-free Newton–Krylov, Eisenstat–Walker inexact-Newton forcing, and multigrid preconditioning) was made.
-
 **Contents**
 1. [Problem statement](#1-problem-statement)
 2. [Requirements](#2-requirements)
