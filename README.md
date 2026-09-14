@@ -6,14 +6,13 @@
 3. [Method 1 — Explicit upwind finite volume](#3-method-1--explicit-upwind-finite-volume)
 4. [Method 2 — Jacobian-Free Newton–Krylov (JFNK)](#4-method-2--jacobian-free-newtonkrylov-jfnk)
 5. [Method 3 — JFNK with a multigrid preconditioner](#5-method-3--jfnk-with-a-multigrid-preconditioner)
-6. [Comparing the two implicit solvers](#6-comparing-the-two-implicit-solvers)
-7. [How to reproduce / adapt this workflow](#7-how-to-reproduce--adapt-this-workflow)
+6. [How to reproduce / adapt this workflow](#7-how-to-reproduce--adapt-this-workflow)
 
 ---
 
 ## 1. Problem statement
 
-The inviscid Burgers' equation is the simplest nonlinear conservation law and the standard model problem for shock-capturing schemes:
+The inviscid Burgers' equation is a simple nonlinear conservation law and the standard model problem for shock-capturing schemes:
 
 $$
 \frac{\partial u}{\partial t} + \frac{\partial}{\partial x}\left(\frac{u^2}{2}\right) = 0 ,
@@ -26,9 +25,9 @@ $$
 u(x, 0) = 2 + \sin(\pi x).
 $$
 
-Because the flux $f(u) = u^2/2$ is nonlinear, characteristics converge and the smooth initial profile steepens into a discontinuity (shock) in finite time — this is the key numerical difficulty all three solvers below have to handle.
+Because the flux $f(u) = u^2/2$ is nonlinear, characteristics converge and the smooth initial profile steepens into a discontinuity (shock) in finite time. This is a key numerical difficulty all three solvers below have to handle.
 
-All three scripts discretize space with a finite-volume / finite-difference grid of spacing $\Delta x$ and use a **Godunov-style upwind flux** (valid here because $u>0$ throughout, so the wind always blows left-to-right):
+All three scripts discretize space with a finite-volume / finite-difference grid of spacing $\Delta x$ and use a **upwind flux** (valid here because $u>0$ throughout, so the wind always blows left-to-right):
 
 $$
 F_{i-1/2} = \frac{1}{2}u_{i-1}^2 .
@@ -38,9 +37,9 @@ The three methods differ only in **how they march in time**:
 
 | Method | Time discretization | File |
 |---|---|---|
-| 1. Explicit upwind | Forward Euler (explicit) | `BurgersEq_ExplicitEuler` |
-| 2. Implicit JFNK | Backward Euler (implicit), solved with Jacobian-Free Newton–Krylov | `BurgersEq_MG` (plain GMRES) |
-| 3. Implicit JFNK + Multigrid | Backward Euler (implicit), Newton step solved with GMRES **preconditioned** by a recursive multigrid cycle | `BurgersEq` |
+| 1. Explicit upwind | Forward Euler (explicit) | `Explicit-Euler` |
+| 2. Implicit JFNK | Backward Euler (implicit), solved with Jacobian-Free Newton–Krylov | `Implicit-Euler` (plain GMRES) |
+| 3. Implicit JFNK + Multigrid | Backward Euler (implicit), Newton step solved with GMRES **preconditioned** by a recursive multigrid cycle | `JFMG` |
 
 ---
 
@@ -59,17 +58,7 @@ Install with:
 pip install numpy scipy matplotlib
 ```
 
-No GPU, compiled extensions, or external solvers are required — everything runs in pure Python/NumPy/SciPy. Runtime for the parameters shipped in the original scripts ($\Delta x = 1/4000$ for the implicit solvers, $\Delta x=1/1000$ for the explicit one) ranges from a few seconds (explicit) to tens of seconds (implicit), depending on machine speed. This document also runs cheaper, reduced-resolution versions so the outputs below execute in well under a second and can be checked interactively.
-
-To run any of the three scripts as delivered:
-
-```bash
-python BurgersEq_ExplicitEuler   # explicit upwind scheme, produces a plot
-python BurgersEq_MG              # implicit JFNK, plain GMRES
-python BurgersEq                 # implicit JFNK, multigrid-preconditioned GMRES
-```
-
-Each script is self-contained: parameters are set at the top (`dx`, `dt`, `T`), and the solve/plot happens at import time (no `if __name__ == "__main__":` guard, no CLI arguments).
+Everything runs in pure Python/NumPy/SciPy. Runtime for the parameters shipped in the original scripts ($\Delta x = 1/4000$ for the implicit solvers, $\Delta x=1/1000$ for the explicit one) ranges from a few seconds (explicit) to tens of seconds (implicit), depending on machine speed. This document also runs cheaper, reduced-resolution versions so the outputs below execute in well under a second and can be checked interactively.
 
 ---
 
@@ -298,7 +287,7 @@ Total JFNK Solver Time: 0.1211 seconds.
 Grid size nx=128, Newton iterations to converge: 6
 ```
 
-Note the GMRES iteration count climbing steadily across Newton iterations (2 → 112): as $\Delta x \to$ smaller values, the Jacobian becomes increasingly ill-conditioned (its condition number scales like $\mathcal{O}(1/\Delta x)$ for this hyperbolic operator), so **unpreconditioned** GMRES needs more and more inner iterations on fine grids. This motivates Method 3.
+Note the GMRES iteration count climbing steadily across Newton iterations: as $\Delta x \to$ smaller values, the Jacobian becomes increasingly ill-conditioned (its condition number scales like $\mathcal{O}(1/\Delta x)$ for this hyperbolic operator), so **unpreconditioned** GMRES needs more and more inner iterations on fine grids. This motivates Method 3.
 
 ---
 
@@ -306,7 +295,7 @@ Note the GMRES iteration count climbing steadily across Newton iterations (2 →
 
 ### 5.1 Why precondition with multigrid
 
-GMRES convergence depends on the spectrum of $J$. As the grid is refined, $J$'s condition number grows, and plain GMRES degrades (see Section 6). A **multigrid preconditioner** $M \approx J^{-1}$ fixes this by solving the linear system approximately on a hierarchy of coarser grids, where the smooth (low-frequency) error components — the ones a simple smoother cannot remove efficiently on the fine grid — are cheap to correct.
+GMRES convergence depends on the spectrum of $J$. As the grid is refined, $J$'s condition number grows, and plain GMRES degrades (see Section 6). A **multigrid preconditioner** $M \approx J^{-1}$ fixes this by solving the linear system approximately on a hierarchy of coarser grids, where the smooth (low-frequency) error components, the ones a simple smoother cannot remove efficiently on the fine grid, are cheap to correct.
 
 ### 5.2 Ingredients
 
@@ -336,7 +325,7 @@ repeated for 3 pseudo-time steps.
 2. Compute the residual, restrict it (and the current state) to the next coarser grid.
 3. Recurse: solve the coarse-grid correction with `MG(level-1, ...)`.
 4. Prolongate the coarse correction back and add it to the fine-grid error.
-5. At the coarsest level (`level == 0`), the Jacobian is small enough to assemble **explicitly** (column-by-column, using $J v = J e_j$ for each unit vector $e_j$) and solved directly with `np.linalg.solve`.
+5. At the coarsest level (`level == 0`), the Jacobian is small enough to assemble **explicitly**  and solved directly with `np.linalg.solve`.
 
 This multigrid cycle is wrapped as a SciPy `LinearOperator` and passed to `gmres(..., M=...)` as a **right-hand preconditioner**, so GMRES effectively solves the better-conditioned system $J M^{-1} y = r$.
 
@@ -502,29 +491,7 @@ Grid size nx=128, MG levels=4, Newton iterations to converge: 4
 ```
 
 ---
-
-## 6. Comparing the two implicit solvers
-
-To see whether the multigrid preconditioner actually pays for itself, both implicit solvers were run back-to-back on the same problem at several grid sizes (coarsening the multigrid hierarchy down to an 8-point grid at every resolution):
-
-| $n_x$ | Plain GMRES — time (s) | Newton its | Total GMRES its | MG-preconditioned — time (s) | Newton its | Total GMRES its |
-|---:|---:|---:|---:|---:|---:|---:|
-| 128  | 0.09  | 6 | 289   | 0.21 | 4 | 163 |
-| 256  | 0.40  | 6 | 609   | 3.79 | 4 | 2693 |
-| 512  | 1.59  | 6 | 1302  | 8.71 | 5 | 5309 |
-| 1024 | 44.32 | 6 | 11795 | 1.07 | 5 | 456 |
-
-**Interpretation.**
-
-- Plain GMRES's cost grows sharply with resolution — at $n_x=1024$ it needed nearly 12,000 total inner iterations, and its per-iteration cost also rises because each GMRES iteration re-orthogonalizes against a longer Krylov basis (no restart was reached here, `restart=2000`). This confirms the conditioning argument in Section 4.5.
-- The multigrid-preconditioned solver's *iteration counts* were noisy at intermediate sizes (256, 512) — worse than expected — before collapsing dramatically at $n_x=1024$ (456 total GMRES iterations vs. 11795, a >25x reduction, and 44x faster wall-clock time). This is a realistic and instructive finding: **the RK2 smoother's fixed pseudo-time step ($\Delta t^\*=10^{-3}$) and fixed step count (3) were tuned for one grid size**, not re-derived per level, so smoothing quality is resolution-dependent. A production multigrid code would scale the smoother's pseudo-time step with $\Delta x$ (e.g. a local CFL-based choice) and/or use more smoothing steps to guarantee monotone improvement at every resolution.
-- The qualitative takeaway is nonetheless the one multigrid theory predicts: **without preconditioning, cost grows superlinearly with grid size; with a properly tuned multigrid preconditioner, cost should stay roughly grid-independent.** The dip in performance at intermediate sizes here is a smoother-tuning artifact, not a flaw in the multigrid *idea* — it is a useful example of why smoother parameters matter as much as the multigrid structure itself.
-
-*(Exact numbers will vary by machine; rerun `scaling_compare.py`-style code locally to reproduce.)*
-
----
-
-## 7. How to reproduce / adapt this workflow
+## 6. How to reproduce / adapt this workflow
 
 1. **Install** the requirements from Section 2.
 2. **Pick a resolution.** Set `dx` at the top of whichever script you're running. For the two implicit scripts, make sure `nx = int(2/dx)` is divisible by $2^{\texttt{level}}$ if you use the multigrid version (`level` is the integer argument passed to `newton_step(level)` at the bottom of `BurgersEq`).
