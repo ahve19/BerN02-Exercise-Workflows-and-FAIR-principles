@@ -6,7 +6,8 @@
 3. [Method 1 — Explicit upwind finite volume](#3-method-1--explicit-upwind-finite-volume)
 4. [Method 2 — Jacobian-Free Newton–Krylov (JFNK)](#4-method-2--jacobian-free-newtonkrylov-jfnk)
 5. [Method 3 — JFNK with a multigrid preconditioner](#5-method-3--jfnk-with-a-multigrid-preconditioner)
-6. [How to reproduce / adapt this workflow](#7-how-to-reproduce--adapt-this-workflow)
+6. [How to reproduce / adapt this workflow](#6-how-to-reproduce--adapt-this-workflow)
+7. [Fair Principles](#7-fair-principles)
 
 ---
 
@@ -499,3 +500,25 @@ Grid size nx=128, MG levels=4, Newton iterations to converge: 4
 4. **Adapt to a different flux/equation.** Because the implicit solvers never form $J$ explicitly, switching to a different scalar conservation law only requires editing `F(U, Uold, dx, dt)` — `Jv`, the Eisenstat–Walker forcing terms, GMRES, and (with the same restriction/prolongation) the multigrid preconditioner all continue to work unchanged.
 5. **Tune the multigrid smoother** (`rk2_smoother`'s `dt_star` and `steps`) if you change resolution substantially — as shown in Section 6, a smoother tuned for one grid can under-perform at another.
 6. **Extend to multiple time steps.** All implicit examples here take a single backward-Euler step of size $\Delta t=0.1$ from the initial condition. To march to a final time $T$, wrap the `newton_step` call in a loop, updating `Uold = U` after each converged step.
+
+---
+
+## 7. Fair Principles
+
+### 7.1 Findable
+
+This repository is public on Github and is findable through a google search. In addition, the repository is described by metadata that provides a second resource of being findable. The repository has a DOI that can also be used to find it.
+
+### 7.2 Accessible
+
+It is freely accessible on Github and the license provides insight on how it can be used. The MIT license was chosen as this code is just a simple implementation to a basic problem and can feasibly be reproduce by others. The license allows for extensive reuse and modification to the code with little ramifications.
+
+### 7.3 Interoperable 
+
+The code uses NumPy arrays and SciPy's standard `LinearOperator` interface. Hence the Jacobian-vector product and multigrid preconditioner can be dropped into any other scipy.sparse.linalg solver without modification. Metadata and documentation are written in YAML and Markdown, both open, easily parseable formats, and the terminology used throughout (Newton–Krylov, GMRES, CFL condition) follows standard numerical-analysis usage. The work is then easy to relate to other solvers and literature in the field.
+
+### 7.4 Reproducible
+
+Every code cell in the write-up is paired with the equation it implements and the exact parameters used to produce its output. The environment is pinned in environment.yml and requirements.txt so the software stack can be reproduced exactly. Combined with the licensing, this means anyone can clone the repository, recreate the same results, and adapt the solvers to a different flux function or equation with minimal changes.
+
+
