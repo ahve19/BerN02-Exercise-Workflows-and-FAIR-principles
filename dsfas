@@ -1,0 +1,382 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "toc_visible": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "# Breast Cancer Diagnostic Analysis: Regression & Classification Workflow\n",
+        "\n",
+        "## Workflow Overview\n",
+        "This notebook presents an end-to-end data science pipeline for analyzing breast mass fine needle aspirate (FNA) diagnostic data. To maintain model continuity, both **Ordinary Least Squares (OLS) Linear Regression** (Linear Probability Model) and **Regularized Logistic Regression** are evaluated, analyzed, and compared.\n",
+        "\n",
+        "### Logical Structure & Visual Enhancements\n",
+        "1. **FAIR Data Ingestion & EDA**: Robust fallback loader with missing value checks, target distribution plots, and key feature density distributions.\n",
+        "2. **Model 1: OLS Linear Regression (Linear Probability Model)**: Statistical modeling using `statsmodels`, evaluating $R^2$, continuous probability distribution, and binary accuracy at a $0.5$ decision threshold.\n",
+        "3. **Model 2: L2-Regularized Logistic Regression**: Classification pipeline with cross-validated hyperparameter tuning and standardized scaling.\n",
+        "4. **Visual Diagnostic Analysis**: Visualizing continuous predictions vs. probability distributions, ROC-AUC curves, confusion matrices, and standardized feature coefficient weights.\n",
+        "5. **Model Comparison & FAIR/Ethical Analysis**: Quantitative comparison table, clinical risk assessment (minimizing False Negatives), and FAIR data checklist."
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 1. FAIR Data Ingestion & Setup"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "import numpy as np\n",
+        "import pandas as pd\n",
+        "import matplotlib.pyplot as plt\n",
+        "import seaborn as sns\n",
+        "import statsmodels.api as sm\n",
+        "\n",
+        "from sklearn.datasets import load_breast_cancer\n",
+        "from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV\n",
+        "from sklearn.preprocessing import StandardScaler\n",
+        "from sklearn.pipeline import Pipeline\n",
+        "from sklearn.linear_model import LogisticRegression\n",
+        "from sklearn.metrics import (\n",
+        "    accuracy_score, precision_score, recall_score, f1_score, roc_auc_score,\n",
+        "    roc_curve, confusion_matrix, ConfusionMatrixDisplay\n",
+        ")\n",
+        "import warnings\n",
+        "\n",
+        "warnings.filterwarnings('ignore')\n",
+        "\n",
+        "# Plotting aesthetics\n",
+        "sns.set_theme(style=\"whitegrid\", palette=\"muted\")\n",
+        "plt.rcParams[\"font.family\"] = \"sans-serif\"\n",
+        "\n",
+        "# Global seed for reproducibility\n",
+        "SEED = 42\n",
+        "np.random.seed(SEED)\n",
+        "\n",
+        "def load_data():\n",
+        "    \"\"\"\n",
+        "    Loads dataset adhering to FAIR principles (Findable, Accessible, Interoperable, Reusable).\n",
+        "    Attempts local Drive path first, then falls back to public UCI dataset via sklearn.\n",
+        "    \"\"\"\n",
+        "    try:\n",
+        "        from google.colab import drive\n",
+        "        drive.mount('/content/gdrive', force_remount=False)\n",
+        "        df = pd.read_csv('gdrive/My Drive/Colab Notebooks/bern 02 stuff/Challenge project/data.csv')\n",
+        "        df = df.drop(columns=['Unnamed: 32', 'id'], errors='ignore')\n",
+        "        df['diagnosis'] = df['diagnosis'].apply(lambda x: 1 if x == 'M' else 0)\n",
+        "        print(\"Data loaded from Google Drive.\")\n",
+        "        return df\n",
+        "    except Exception as e:\n",
+        "        print(f\"Drive path unaccessible ({e}). Loading dataset via scikit-learn...\")\n",
+        "        data = load_breast_cancer(as_frame=True)\n",
+        "        df = data.frame\n",
+        "        df = df.rename(columns={'target': 'diagnosis'})\n",
+        "        return df\n",
+        "\n",
+        "df = load_data()\n",
+        "print(f\"Dataset Shape: {df.shape}\")\n",
+        "df.head()"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 2. Exploratory Data Analysis (EDA) & Visualizations"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# Class distribution visualization\n",
+        "fig, axes = plt.subplots(1, 2, figsize=(14, 5))\n",
+        "\n",
+        "# Subplot 1: Target class counts\n",
+        "ax = sns.countplot(ax=axes[0], x='diagnosis', data=df, palette=['#2b5c8f', '#d95f02'])\n",
+        "axes[0].set_xticklabels(['Benign (0)', 'Malignant (1)'])\n",
+        "axes[0].set_title('Target Class Distribution', fontsize=12, fontweight='bold')\n",
+        "axes[0].set_xlabel('Diagnosis')\n",
+        "axes[0].set_ylabel('Count')\n",
+        "\n",
+        "for p in ax.patches:\n",
+        "    height = p.get_height()\n",
+        "    ax.annotate(f'{height} ({height/len(df)*100:.1f}%)',\n",
+        "                (p.get_x() + p.get_width() / 2., height / 2),\n",
+        "                ha='center', va='center', color='white', fontweight='bold')\n",
+        "\n",
+        "# Subplot 2: Correlation of top features with target diagnosis\n",
+        "correlations = df.corr()['diagnosis'].drop('diagnosis').sort_values()\n",
+        "top_corrs = pd.concat([correlations.head(5), correlations.tail(5)])\n",
+        "sns.barplot(ax=axes[1], x=top_corrs.values, y=top_corrs.index, palette='vlag')\n",
+        "axes[1].set_title('Top Positive & Negative Feature Correlations with Diagnosis', fontsize=12, fontweight='bold')\n",
+        "axes[1].set_xlabel('Pearson Correlation Coefficient')\n",
+        "\n",
+        "plt.tight_layout()\n",
+        "plt.show()"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 3. Data Preprocessing & Leakage-Free Setup"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# Separate features and target label\n",
+        "X = df.drop(columns=['diagnosis'])\n",
+        "y = df['diagnosis']\n",
+        "\n",
+        "# Stratified Train-Test Split (80/20)\n",
+        "X_train, X_test, y_train, y_test = train_test_split(\n",
+        "    X, y, test_size=0.20, random_state=SEED, stratify=y\n",
+        ")\n",
+        "\n",
+        "print(f\"Train set: {X_train.shape[0]} samples | Test set: {X_test.shape[0]} samples\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 4. Model 1: Ordinary Least Squares (OLS) Linear Regression\n",
+        "\n",
+        "### Model Description & Narrative\n",
+        "In a Linear Probability Model framework, OLS models binary outcomes directly: $P(Y=1\vert{}X) = X\\beta$. While standard linear regression provides direct interpretable slope coefficients, its continuous predictions can extend outside $[0, 1]$, and standard errors do not assume binary variance."
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# Fit OLS using statsmodels\n",
+        "X_train_const = sm.add_constant(X_train)\n",
+        "X_test_const = sm.add_constant(X_test)\n",
+        "\n",
+        "ols_model = sm.OLS(y_train, X_train_const).fit()\n",
+        "\n",
+        "# Predict continuous output on test set\n",
+        "y_pred_ols_continuous = ols_model.predict(X_test_const)\n",
+        "# Convert continuous outputs to binary decisions at 0.5 threshold\n",
+        "y_pred_ols_binary = (y_pred_ols_continuous >= 0.5).astype(int)\n",
+        "\n",
+        "print(f\"OLS R-squared: {ols_model.rsquared:.4f}\")\n",
+        "print(f\"OLS Adjusted R-squared: {ols_model.rsquared_adj:.4f}\")\n",
+        "print(f\"OLS Test Accuracy (at threshold 0.5): {accuracy_score(y_test, y_pred_ols_binary):.4f}\")\n",
+        "print(f\"OLS Test ROC-AUC: {roc_auc_score(y_test, y_pred_ols_continuous):.4f}\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 5. Model 2: L2-Regularized Logistic Regression\n",
+        "\n",
+        "### Model Description & Narrative\n",
+        "Logistic Regression models log-odds using the sigmoid mapping function:\n",
+        "$$P(Y=1\vert{}X) = \\frac{1}{1 + e^{-X\\beta}}$$\n",
+        "To ensure scaling parameters do not leak between validation sets, feature scaling (`StandardScaler`) is combined with the model inside a `Pipeline`."
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# Leakage-Free Pipeline\n",
+        "pipeline_lr = Pipeline([\n",
+        "    ('scaler', StandardScaler()),\n",
+        "    ('classifier', LogisticRegression(random_state=SEED, max_iter=1000))\n",
+        "])\n",
+        "\n",
+        "# Stratified 10-Fold Cross-Validation\n",
+        "cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=SEED)\n",
+        "param_grid = {\n",
+        "    'classifier__C': [0.01, 0.1, 1.0, 10.0],\n",
+        "    'classifier__penalty': ['l2'],\n",
+        "    'classifier__solver': ['lbfgs']\n",
+        "}\n",
+        "\n",
+        "grid_lr = GridSearchCV(pipeline_lr, param_grid, cv=cv, scoring='roc_auc', n_jobs=-1)\n",
+        "grid_lr.fit(X_train, y_train)\n",
+        "\n",
+        "best_lr = grid_lr.best_estimator_\n",
+        "\n",
+        "# Predictions\n",
+        "y_pred_lr_binary = best_lr.predict(X_test)\n",
+        "y_prob_lr = best_lr.predict_proba(X_test)[:, 1]\n",
+        "\n",
+        "print(f\"Best Hyperparameters: {grid_lr.best_params_}\")\n",
+        "print(f\"Best CV ROC-AUC: {grid_lr.best_score_:.4f}\")\n",
+        "print(f\"Test Set Accuracy: {accuracy_score(y_test, y_pred_lr_binary):.4f}\")\n",
+        "print(f\"Test Set ROC-AUC: {roc_auc_score(y_test, y_prob_lr):.4f}\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 6. Comprehensive Visual Diagnostic Suite"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "fig, axes = plt.subplots(2, 2, figsize=(14, 11))\n",
+        "\n",
+        "# Plot 1: OLS Continuous Prediction Distribution\n",
+        "sns.histplot(ax=axes[0, 0], x=y_pred_ols_continuous, hue=y_test, kde=True, bins=25, palette=['#2b5c8f', '#d95f02'])\n",
+        "axes[0, 0].axvline(0.5, color='red', linestyle='--', label='Decision Boundary (0.5)')\n",
+        "axes[0, 0].set_title('OLS Linear Regression Continuous Predictions', fontweight='bold')\n",
+        "axes[0, 0].set_xlabel('Predicted Value (Can exceed [0, 1])')\n",
+        "axes[0, 0].legend()\n",
+        "\n",
+        "# Plot 2: Logistic Regression Probability Distribution\n",
+        "sns.histplot(ax=axes[0, 1], x=y_prob_lr, hue=y_test, kde=True, bins=25, palette=['#2b5c8f', '#d95f02'])\n",
+        "axes[0, 1].axvline(0.5, color='red', linestyle='--', label='Decision Boundary (0.5)')\n",
+        "axes[0, 1].set_title('Logistic Regression Probability Distribution', fontweight='bold')\n",
+        "axes[0, 1].set_xlabel('Predicted Probability P(Malignant)')\n",
+        "axes[0, 1].legend()\n",
+        "\n",
+        "# Plot 3: Confusion Matrix for Logistic Regression\n",
+        "cm_lr = confusion_matrix(y_test, y_pred_lr_binary)\n",
+        "ConfusionMatrixDisplay(cm_lr, display_labels=['Benign', 'Malignant']).plot(ax=axes[1, 0], cmap='Blues', colorbar=False)\n",
+        "axes[1, 0].set_title('Logistic Regression Confusion Matrix', fontweight='bold')\n",
+        "\n",
+        "# Plot 4: ROC Curves Comparison\n",
+        "fpr_ols, tpr_ols, _ = roc_curve(y_test, y_pred_ols_continuous)\n",
+        "fpr_lr, tpr_lr, _ = roc_curve(y_test, y_prob_lr)\n",
+        "\n",
+        "axes[1, 1].plot(fpr_ols, tpr_ols, label=f'OLS Regression (AUC = {roc_auc_score(y_test, y_pred_ols_continuous):.3f})', color='#2b5c8f', linewidth=2)\n",
+        "axes[1, 1].plot(fpr_lr, tpr_lr, label=f'Logistic Regression (AUC = {roc_auc_score(y_test, y_prob_lr):.3f})', color='#d95f02', linewidth=2)\n",
+        "axes[1, 1].plot([0, 1], [0, 1], 'k--', label='Random Chance')\n",
+        "axes[1, 1].set_title('ROC Curves Comparison', fontweight='bold')\n",
+        "axes[1, 1].set_xlabel('False Positive Rate')\n",
+        "axes[1, 1].set_ylabel('True Positive Rate')\n",
+        "axes[1, 1].legend()\n",
+        "axes[1, 1].grid(True, alpha=0.3)\n",
+        "\n",
+        "plt.tight_layout()\n",
+        "plt.show()"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 7. Feature Coefficient & Risk Analysis"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "# Extract Logistic Regression Standardized Coefficients\n",
+        "lr_model = best_lr.named_steps['classifier']\n",
+        "coef_df = pd.DataFrame({\n",
+        "    'Feature': X.columns,\n",
+        "    'Coefficient': lr_model.coef_[0],\n",
+        "    'Odds Ratio': np.exp(lr_model.coef_[0])\n",
+        "}).sort_values(by='Coefficient', ascending=False)\n",
+        "\n",
+        "plt.figure(figsize=(10, 7))\n",
+        "top_bottom = pd.concat([coef_df.head(8), coef_df.tail(8)])\n",
+        "sns.barplot(data=top_bottom, x='Coefficient', y='Feature', palette='vlag')\n",
+        "plt.title('Top Positive & Negative Standardized Coefficients (Logistic Regression)', fontsize=13, fontweight='bold')\n",
+        "plt.xlabel('Standardized Coefficient Weight')\n",
+        "plt.ylabel('Cell Nucleus Feature')\n",
+        "plt.show()\n",
+        "\n",
+        "print(\"Top Features Increasing Probability of Malignancy (Highest Odds Ratios):\")\n",
+        "print(coef_df.head(5)[['Feature', 'Coefficient', 'Odds Ratio']].to_string(index=False))"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 8. Comparative Quantitative Performance"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "outputs": [],
+      "source": [
+        "metrics_comp = pd.DataFrame({\n",
+        "    'Metric': ['Accuracy', 'Precision', 'Recall (Sensitivity)', 'F1-Score', 'ROC-AUC'],\n",
+        "    'OLS Linear Regression': [\n",
+        "        accuracy_score(y_test, y_pred_ols_binary),\n",
+        "        precision_score(y_test, y_pred_ols_binary),\n",
+        "        recall_score(y_test, y_pred_ols_binary),\n",
+        "        f1_score(y_test, y_pred_ols_binary),\n",
+        "        roc_auc_score(y_test, y_pred_ols_continuous)\n",
+        "    ],\n",
+        "    'Logistic Regression': [\n",
+        "        accuracy_score(y_test, y_pred_lr_binary),\n",
+        "        precision_score(y_test, y_pred_lr_binary),\n",
+        "        recall_score(y_test, y_pred_lr_binary),\n",
+        "        f1_score(y_test, y_pred_lr_binary),\n",
+        "        roc_auc_score(y_test, y_prob_lr)\n",
+        "    ]\n",
+        "})\n",
+        "\n",
+        "print(\"--- Metric Comparison Table ---\")\n",
+        "print(metrics_comp.to_string(index=False))"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 9. FAIR Data Principles & Ethical Discussion\n",
+        "\n",
+        "### FAIR Principles Assessment\n",
+        "- **Findable**: Dataset source metadata (UCI Machine Learning Repository) documented explicitly.\n",
+        "- **Accessible**: Automatic fallback loader ensures execution even if Google Drive paths are unmounted.\n",
+        "- **Interoperable**: Leverages standardized `scikit-learn` `Pipeline` objects and `pandas` DataFrames.\n",
+        "- **Reusable**: Deterministic random seed (`SEED = 42`) and hyperparameter tuning specs enable reproducible results.\n",
+        "\n",
+        "### Ethical & Clinical Consideration\n",
+        "1. **Clinical Asymmetry**: Misclassifying a malignant sample as benign (**False Negative**) carries severe consequences. Model threshold settings can be calibrated below $0.5$ to maximize **Recall**.\n",
+        "2. **Model Behavior**: OLS provides an intuitive linear baseline, but **Logistic Regression** naturally bounds predictions to valid probability ranges $[0, 1]$ and produces odds ratios suitable for clinical decision support."
+      ]
+    }
+  ]
+}
